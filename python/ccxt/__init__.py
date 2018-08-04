@@ -63,6 +63,7 @@ from ccxt.base.errors import OrderNotFillable               # noqa: F401
 
 from ccxt._1broker import _1broker                          # noqa: F401
 from ccxt._1btcxe import _1btcxe                            # noqa: F401
+from ccxt._1fox import _1fox                                # noqa: F401
 from ccxt.acx import acx                                    # noqa: F401
 from ccxt.allcoin import allcoin                            # noqa: F401
 from ccxt.anxpro import anxpro                              # noqa: F401
@@ -77,6 +78,7 @@ from ccxt.bitbay import bitbay                              # noqa: F401
 from ccxt.bitfinex import bitfinex                          # noqa: F401
 from ccxt.bitfinex2 import bitfinex2                        # noqa: F401
 from ccxt.bitflyer import bitflyer                          # noqa: F401
+from ccxt.bitforex import bitforex                          # noqa: F401
 from ccxt.bithumb import bithumb                            # noqa: F401
 from ccxt.bitkk import bitkk                                # noqa: F401
 from ccxt.bitlish import bitlish                            # noqa: F401
@@ -193,6 +195,7 @@ from ccxt.zb import zb                                      # noqa: F401
 exchanges = [
     '_1broker',
     '_1btcxe',
+    '_1fox',
     'acx',
     'allcoin',
     'anxpro',
@@ -207,6 +210,7 @@ exchanges = [
     'bitfinex',
     'bitfinex2',
     'bitflyer',
+    'bitforex',
     'bithumb',
     'bitkk',
     'bitlish',
