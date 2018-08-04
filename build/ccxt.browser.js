@@ -45,7 +45,7 @@ const Exchange  = require ('./js/base/Exchange')
 //-----------------------------------------------------------------------------
 // this is updated by vss.js when building
 
-const version = '1.17.63'
+const version = '1.17.76'
 
 Exchange.ccxtVersion = version
 
@@ -2875,7 +2875,7 @@ module.exports = class Exchange {
                 continue
             result.push (ohlcv)
         }
-        return result
+        return this.sortBy (result, 0)
     }
 
     editLimitBuyOrder (id, symbol, ...args) {
@@ -8463,7 +8463,7 @@ module.exports = class bitfinex extends Exchange {
                 },
             },
             'commonCurrencies': {
-                'ATM': 'Atonomi', // issue #3383
+                'ATM': 'ATMI', // Bitfinex uses ATM instead of the official ATMI
                 'BCC': 'CST_BCC',
                 'BCU': 'CST_BCU',
                 'CTX': 'CTXC',
@@ -21925,9 +21925,11 @@ module.exports = class coinex extends Exchange {
 
     parseTrade (trade, market = undefined) {
         // this method parses both public and private trades
-        let timestamp = this.safeInteger (trade, 'create_time') * 1000;
+        let timestamp = this.safeInteger (trade, 'create_time');
         if (typeof timestamp === 'undefined') {
             timestamp = this.safeInteger (trade, 'date_ms');
+        } else {
+            timestamp = timestamp * 1000;
         }
         let tradeId = this.safeString (trade, 'id');
         let orderId = this.safeString (trade, 'order_id');
@@ -33320,6 +33322,10 @@ module.exports = class gemini extends Exchange {
         };
     }
 
+    nonce () {
+        return this.milliseconds ();
+    }
+
     sign (path, api = 'public', method = 'GET', params = {}, headers = undefined, body = undefined) {
         let url = '/' + this.version + '/' + this.implodeParams (path, params);
         let query = this.omit (params, this.extractParams (path));
@@ -36524,8 +36530,9 @@ module.exports = class huobipro extends Exchange {
                 }
             }
         }
-        if (market)
+        if (typeof market !== 'undefined') {
             symbol = market['symbol'];
+        }
         let timestamp = order['created-at'];
         let amount = this.safeFloat (order, 'amount');
         let filled = parseFloat (order['field-amount']);
@@ -36533,8 +36540,10 @@ module.exports = class huobipro extends Exchange {
         let price = this.safeFloat (order, 'price');
         let cost = parseFloat (order['field-cash-amount']);
         let average = 0;
-        if (filled)
+        // if filled is defined and is not zero
+        if (filled) {
             average = parseFloat (cost / filled);
+        }
         let result = {
             'info': order,
             'id': order['id'].toString (),
@@ -41074,6 +41083,10 @@ module.exports = class lbank extends Exchange {
                         'cancel_order',
                         'orders_info',
                         'orders_info_history',
+                        'withdraw',
+                        'withdrawCancel',
+                        'withdraws',
+                        'withdrawConfigs',
                     ],
                 },
             },
@@ -41473,6 +41486,26 @@ module.exports = class lbank extends Exchange {
         return closed + cancelled;
     }
 
+    async withdraw (code, amount, address, tag = undefined, params = {}) {
+        // mark and fee are optional params, mark is a note and must be less than 255 characters
+        this.checkAddress (address);
+        await this.loadMarkets ();
+        let currency = this.currency (code);
+        let request = {
+            'assetCode': currency['id'],
+            'amount': amount,
+            'account': address,
+        };
+        if (typeof tag !== 'undefined') {
+            request['memo'] = tag;
+        }
+        let response = this.privatePostWithdraw (this.extend (request, params));
+        return {
+            'id': response['id'],
+            'info': response,
+        };
+    }
+
     sign (path, api = 'public', method = 'GET', params = {}, headers = undefined, body = undefined) {
         let query = this.omit (params, this.extractParams (path));
         let url = this.urls['api'] + '/' + this.version + '/' + this.implodeParams (path, params);
@@ -41521,6 +41554,7 @@ module.exports = class lbank extends Exchange {
                 '10018': 'order inquiry can not be more than 50 less than one',
                 '10019': 'withdrawal orders can not be more than 3 less than one',
                 '10020': 'less than the minimum amount of the transaction limit of 0.001',
+                '10022': 'Insufficient key authority',
             }, errorCode, this.json (response));
             let ErrorClass = this.safeValue ({
                 '10002': AuthenticationError,
@@ -41536,6 +41570,7 @@ module.exports = class lbank extends Exchange {
                 '10014': InvalidOrder,
                 '10015': InvalidOrder,
                 '10016': InvalidOrder,
+                '10022': AuthenticationError,
             }, errorCode, ExchangeError);
             throw new ErrorClass (message);
         }
@@ -46037,7 +46072,7 @@ module.exports = class paymium extends Exchange {
 //  ---------------------------------------------------------------------------
 
 const Exchange = require ('./base/Exchange');
-const { ExchangeError, ExchangeNotAvailable, RequestTimeout, AuthenticationError, DDoSProtection, InsufficientFunds, OrderNotFound, OrderNotCached, InvalidOrder, AccountSuspended, CancelPending, InvalidNonce } = require ('./base/errors');
+const { ExchangeError, ExchangeNotAvailable, RequestTimeout, AuthenticationError, PermissionDenied, DDoSProtection, InsufficientFunds, OrderNotFound, OrderNotCached, InvalidOrder, AccountSuspended, CancelPending, InvalidNonce } = require ('./base/errors');
 
 //  ---------------------------------------------------------------------------
 
@@ -46185,6 +46220,15 @@ module.exports = class poloniex extends Exchange {
                         },
                     },
                 },
+            },
+            'exceptions': {
+                'Invalid order number, or you are not the person who placed the order.': OrderNotFound,
+                'Permission denied': PermissionDenied,
+                'Connection timed out. Please try again.': RequestTimeout,
+                'Internal error. Please try again.': ExchangeNotAvailable,
+                'Order not found, or you are not the person who placed it.': OrderNotFound,
+                'Invalid API key/secret pair.': AuthenticationError,
+                'Please do not make more than 8 API calls per second.': DDoSProtection,
             },
         });
     }
@@ -46369,8 +46413,18 @@ module.exports = class poloniex extends Exchange {
         let result = {};
         for (let i = 0; i < ids.length; i++) {
             let id = ids[i];
-            let market = this.markets_by_id[id];
-            let symbol = market['symbol'];
+            let symbol = undefined;
+            let market = undefined;
+            if (id in this.markets_by_id) {
+                let market = this.markets_by_id[id];
+                symbol = market['symbol'];
+            } else {
+                let [ quoteId, baseId ] = id.split ('_');
+                let base = this.commonCurrencyCode (baseId);
+                let quote = this.commonCurrencyCode (quoteId);
+                symbol = base + '/' + quote;
+                market = { 'symbol': symbol };
+            }
             let ticker = tickers[id];
             result[symbol] = this.parseTicker (ticker, market);
         }
@@ -46883,21 +46937,13 @@ module.exports = class poloniex extends Exchange {
             // syntax error, resort to default error handler
             return;
         }
+        // {"error":"Permission denied."}
         if ('error' in response) {
             const message = response['error'];
             const feedback = this.id + ' ' + this.json (response);
-            if (message === 'Invalid order number, or you are not the person who placed the order.') {
-                throw new OrderNotFound (feedback);
-            } else if (message === 'Connection timed out. Please try again.') {
-                throw new RequestTimeout (feedback);
-            } else if (message === 'Internal error. Please try again.') {
-                throw new ExchangeNotAvailable (feedback);
-            } else if (message === 'Order not found, or you are not the person who placed it.') {
-                throw new OrderNotFound (feedback);
-            } else if (message === 'Invalid API key/secret pair.') {
-                throw new AuthenticationError (feedback);
-            } else if (message === 'Please do not make more than 8 API calls per second.') {
-                throw new DDoSProtection (feedback);
+            let exceptions = this.exceptions;
+            if (message in exceptions) {
+                throw new exceptions[message] (feedback);
             } else if (message.indexOf ('Total must be at least') >= 0) {
                 throw new InvalidOrder (feedback);
             } else if (message.indexOf ('This account is frozen.') >= 0) {
@@ -52813,6 +52859,7 @@ module.exports = class zb extends Exchange {
                 'fetchOrder': true,
                 'fetchOrders': true,
                 'fetchOpenOrders': true,
+                'fetchOHLCV': true,
                 'withdraw': true,
             },
             'timeframes': {
@@ -52873,6 +52920,7 @@ module.exports = class zb extends Exchange {
                     'get': [
                         'markets',
                         'ticker',
+                        'allTicker',
                         'depth',
                         'trades',
                         'kline',
@@ -53042,7 +53090,12 @@ module.exports = class zb extends Exchange {
             'currency': currency['id'],
         });
         let address = response['message']['datas']['key'];
-        let tag = undefined; // todo: figure this out
+        let tag = undefined;
+        if (address.indexOf ('_') >= 0) {
+            let arr = address.split ('_');
+            address = arr[0];  // WARNING: MAY BE tag_address INSTEAD OF address_tag FOR SOME CURRENCIES!!
+            tag = arr[1];
+        }
         return {
             'currency': code,
             'address': address,
@@ -53061,6 +53114,24 @@ module.exports = class zb extends Exchange {
         return this.parseOrderBook (orderbook);
     }
 
+    async fetchTickers (symbols = undefined, params = {}) {
+        await this.loadMarkets ();
+        let response = await this.publicGetAllTicker (params);
+        let result = {};
+        let anotherMarketsById = {};
+        let marketIds = Object.keys (this.marketsById);
+        for (let i = 0; i < marketIds.length; i++) {
+            let tickerId = marketIds[i].replace ('_', '');
+            anotherMarketsById[tickerId] = this.marketsById[marketIds[i]];
+        }
+        let ids = Object.keys (response);
+        for (let i = 0; i < ids.length; i++) {
+            let market = anotherMarketsById[ids[i]];
+            result[market['symbol']] = this.parseTicker (response[ids[i]], market);
+        }
+        return result;
+    }
+
     async fetchTicker (symbol, params = {}) {
         await this.loadMarkets ();
         let market = this.market (symbol);
@@ -53069,7 +53140,15 @@ module.exports = class zb extends Exchange {
         request[marketFieldName] = market['id'];
         let response = await this.publicGetTicker (this.extend (request, params));
         let ticker = response['ticker'];
+        return this.parseTicker (ticker, market);
+    }
+
+    parseTicker (ticker, market = undefined) {
         let timestamp = this.milliseconds ();
+        let symbol = undefined;
+        if (market !== 'undefined') {
+            symbol = market['symbol'];
+        }
         let last = this.safeFloat (ticker, 'last');
         return {
             'symbol': symbol,
@@ -53108,7 +53187,8 @@ module.exports = class zb extends Exchange {
         if (typeof since !== 'undefined')
             request['since'] = since;
         let response = await this.publicGetKline (this.extend (request, params));
-        return this.parseOHLCVs (response['data'], market, timeframe, since, limit);
+        let data = this.safeValue (response, 'data', []);
+        return this.parseOHLCVs (data, market, timeframe, since, limit);
     }
 
     parseTrade (trade, market = undefined) {

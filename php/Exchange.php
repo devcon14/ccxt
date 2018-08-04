@@ -34,7 +34,7 @@ use kornrunner\Eth;
 use kornrunner\Secp256k1;
 use kornrunner\Solidity;
 
-$version = '1.17.63';
+$version = '1.17.76';
 
 // rounding mode
 const TRUNCATE = 0;
@@ -50,7 +50,7 @@ const PAD_WITH_ZERO = 1;
 
 class Exchange {
 
-    const VERSION = '1.17.63';
+    const VERSION = '1.17.76';
 
     public static $eth_units = array (
         'wei'        => '1',
@@ -1267,7 +1267,7 @@ class Exchange {
                 continue;
             $result[] = $ohlcv;
         }
-        return $result;
+        return $this->sort_by ($result, 0);
     }
 
     public function parseOHLCVs ($ohlcvs, $market = null, $timeframe = 60, $since = null, $limit = null) {
